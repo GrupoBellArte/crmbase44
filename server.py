@@ -3,7 +3,7 @@ import json
 
 app = Flask(__name__)
 
-# Lista de ferramentas (MCP exige um "tool list")
+# Definição das ferramentas disponíveis
 TOOLS = [
     {
         "name": "consultarClientes",
@@ -29,7 +29,7 @@ TOOLS = [
     }
 ]
 
-# Endpoint SSE para o ChatGPT listar ferramentas
+# Endpoint para ChatGPT listar ferramentas
 @app.route("/sse")
 def sse():
     def event_stream():
@@ -37,19 +37,22 @@ def sse():
         yield f"data: {json.dumps({'tools': TOOLS})}\n\n"
     return Response(event_stream(), mimetype="text/event-stream")
 
-# Endpoint para o ChatGPT mandar ações (POST)
+# Endpoint para ChatGPT mandar ações
 @app.route("/messages", methods=["POST"])
 def messages():
     try:
         data = request.json
-        print("Mensagem recebida:", data)
+        print("Mensagem recebida:", json.dumps(data, indent=2))
 
-        # Exemplo de resposta genérica
+        # Simulação de execução da ferramenta
+        tool_name = data.get("tool", "desconhecido")
+        arguments = data.get("arguments", {})
+
         resposta = {
             "content": [
                 {
                     "type": "text",
-                    "text": f"Recebi a ação: {data}"
+                    "text": f"A ferramenta {tool_name} foi chamada com argumentos {arguments}"
                 }
             ]
         }
@@ -58,6 +61,7 @@ def messages():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Página inicial
 @app.route("/")
 def home():
     return "MCP server do CRM Base44 está no ar. Use /sse e /messages."
