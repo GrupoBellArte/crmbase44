@@ -2,7 +2,7 @@ from flask import Flask, request, Response, jsonify
 
 app = Flask(__name__)
 
-# Lista de ferramentas que o ChatGPT vai enxergar
+# Ferramentas expostas ao ChatGPT
 TOOLS = [
     {
         "name": "consultarClientes",
@@ -29,9 +29,9 @@ TOOLS = [
 
 @app.route("/")
 def home():
-    return "✅ MCP server do CRM Base44 está no ar. Use /sse e /messages."
+    return "✅ MCP server do CRM Base44 está rodando. Use /sse e /messages."
 
-# Endpoint SSE para listar as ferramentas
+# SSE → ChatGPT descobre as ferramentas
 @app.route("/sse", methods=["GET"])
 def sse():
     def stream():
@@ -39,22 +39,32 @@ def sse():
         yield f"data: { {'tools': TOOLS} }\n\n"
     return Response(stream(), mimetype="text/event-stream")
 
-# Endpoint para processar chamadas do ChatGPT
+# Messages → ChatGPT chama aqui quando usa uma ferramenta
 @app.route("/messages", methods=["POST"])
 def messages():
-    data = request.json
+    data = request.json or {}
     tool = data.get("tool")
     params = data.get("params", {})
 
-    # Simulação de respostas — aqui depois você liga na API do Base44
-    if tool == "consultarClientes":
-        resposta = {"clientes": [{"id": "123", "nome": "João Silva"}]}
-    elif tool == "atualizarCliente":
-        resposta = {"status": "sucesso", "id": params.get("id"), "dados": params.get("dados")}
-    else:
-        resposta = {"erro": f"Ferramenta {tool} não reconhecida."}
+    try:
+        if tool == "consultarClientes":
+            # Simulação
+            resposta = {"clientes": [{"id": "123", "nome": "João Silva"}]}
 
-    return jsonify(resposta)
+        elif tool == "atualizarCliente":
+            resposta = {
+                "status": "sucesso",
+                "id": params.get("id"),
+                "dados": params.get("dados")
+            }
+
+        else:
+            resposta = {"erro": f"Ferramenta {tool} não reconhecida."}
+
+        return jsonify(resposta)
+
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
