@@ -1,14 +1,18 @@
-from flask import Flask, request, jsonify, Response
-import json
+from flask import Flask, request, Response, jsonify
 
 app = Flask(__name__)
 
-# Lista de ferramentas MCP
-tools = [
+# Lista de ferramentas que o ChatGPT vai enxergar
+TOOLS = [
     {
         "name": "consultarClientes",
         "description": "Busca clientes no CRM",
-        "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}}
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"}
+            }
+        }
     },
     {
         "name": "atualizarCliente",
@@ -20,53 +24,37 @@ tools = [
                 "dados": {"type": "object"}
             }
         }
-    },
-    {
-        "name": "consultarInteracoes",
-        "description": "Lista interações de um cliente",
-        "inputSchema": {"type": "object", "properties": {"client_id": {"type": "string"}}}
-    },
-    {
-        "name": "consultarTarefas",
-        "description": "Lista tarefas do CRM",
-        "inputSchema": {"type": "object", "properties": {"client_id": {"type": "string"}}}
-    },
-    {
-        "name": "consultarVisitas",
-        "description": "Lista visitas agendadas",
-        "inputSchema": {"type": "object", "properties": {"client_id": {"type": "string"}}}
-    },
-    {
-        "name": "consultarContatosLoja",
-        "description": "Lista contatos de uma loja",
-        "inputSchema": {"type": "object", "properties": {"client_id": {"type": "string"}}}
     }
 ]
 
-# Endpoint MCP: lista as ferramentas
-@app.route("/sse", methods=["GET"])
-def sse():
-    payload = {"type": "tool_list", "tools": tools}
-    return jsonify(payload)
-
-# Endpoint MCP: processa chamadas do ChatGPT
-@app.route("/messages", methods=["POST"])
-def messages():
-    data = request.get_json()
-    print("Mensagem recebida do ChatGPT:", data)
-
-    # Exemplo de resposta genérica
-    response = {
-        "type": "message",
-        "content": [
-            {"type": "text", "text": "Recebi sua solicitação e em breve irei responder."}
-        ]
-    }
-    return jsonify(response)
-
 @app.route("/")
 def home():
-    return "🚀 MCP server do CRM Base44 está no ar! Use /sse e /messages."
+    return "✅ MCP server do CRM Base44 está no ar. Use /sse e /messages."
+
+# Endpoint SSE para listar as ferramentas
+@app.route("/sse", methods=["GET"])
+def sse():
+    def stream():
+        yield "event: tool_list\n"
+        yield f"data: { {'tools': TOOLS} }\n\n"
+    return Response(stream(), mimetype="text/event-stream")
+
+# Endpoint para processar chamadas do ChatGPT
+@app.route("/messages", methods=["POST"])
+def messages():
+    data = request.json
+    tool = data.get("tool")
+    params = data.get("params", {})
+
+    # Simulação de respostas — aqui depois você liga na API do Base44
+    if tool == "consultarClientes":
+        resposta = {"clientes": [{"id": "123", "nome": "João Silva"}]}
+    elif tool == "atualizarCliente":
+        resposta = {"status": "sucesso", "id": params.get("id"), "dados": params.get("dados")}
+    else:
+        resposta = {"erro": f"Ferramenta {tool} não reconhecida."}
+
+    return jsonify(resposta)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
