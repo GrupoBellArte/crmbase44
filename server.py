@@ -1,9 +1,10 @@
 from flask import Flask, request, Response, jsonify, stream_with_context
 import json
+import os
 
 app = Flask(__name__)
 
-# Ferramentas disponíveis
+# --- Definição de ferramentas (MCP Tools) ---
 TOOLS = [
     {
         "name": "consultarClientes",
@@ -11,8 +12,8 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "id": {"type": "string"},
-                "dados": {"type": "object"}
+                "id": {"type": "string", "description": "ID do cliente"},
+                "dados": {"type": "object", "description": "Filtros adicionais"}
             }
         }
     },
@@ -30,67 +31,121 @@ TOOLS = [
     }
 ]
 
-# === ENDPOINTS MCP ===
+SERVER_NAME = "CRM Base44 MCP"
+SERVER_VERSION = "1.0.0"
+DEFAULT_PROTOCOL = "2025-06-18"  # compat com clientes atuais
 
-# /sse deve responder tanto GET quanto POST
-@app.route("/sse", methods=["GET", "POST"])
+# --- Helpers JSON-RPC ---
+def rpc_ok(req_id, result):
+    return {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+def rpc_err(req_id, code, message, data=None):
+    err = {"code": code, "message": message}
+    if data is not None:
+        err["data"] = data
+    return {"jsonrpc": "2.0", "id": req_id, "error": err}
+
+def get_base_url():
+    proto = request.headers.get("X-Forwarded-Proto", request.scheme)
+    host = request.headers.get("X-Forwarded-Host", request.host)
+    return f"{proto}://{host}"
+
+# === ENDPOINTS MCP (HTTP+SSE “antigo”) ===
+# /sse: SOMENTE GET. O cliente abrirá um EventSource e lerá o `endpoint`.
+@app.get("/sse")
 def sse():
     def generate():
-        base = request.headers.get("X-Forwarded-Proto", request.scheme) + "://" + request.headers.get("X-Forwarded-Host", request.host)
-        message_url = f"{base}/messages"
+        message_url = f"{get_base_url()}/messages"
+        # O payload do evento `endpoint` deve ser uma STRING com a URI do endpoint de mensagens
+        # (não um JSON). Depois disso, podemos manter a conexão aberta/quieta.
+        yield "event: endpoint\n"
+        yield f"data: {message_url}\n\n"
+        # (Opcional) keep-alive ping a cada 25s para proxies não derrubarem a conexão
+        # while True:
+        #     yield ": keep-alive\n\n"
+        #     time.sleep(25)
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
+    }
+    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=headers)
 
-        # evento endpoint
-        yield f"event: endpoint\n"
-        yield f"data: {json.dumps({'type': 'endpoint', 'message_url': message_url})}\n\n"
-
-        # server_info com ferramentas
-        yield f"event: message\n"
-        yield f"data: {json.dumps({'type': 'server_info', 'tools': TOOLS})}\n\n"
-
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
-
-
-# /messages recebe as chamadas do ChatGPT
-@app.route("/messages", methods=["POST"])
+# /messages: recebe JSON-RPC do cliente
+@app.post("/messages")
 def messages():
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
+        # Notificações (sem id) => 202 Accepted sem corpo (conforme Streamable HTTP; serve aqui também)
+        # mas o ChatGPT deve enviar Requests com id.
         req_id = data.get("id")
         method = data.get("method")
         params = data.get("params") or {}
 
-        # Lista ferramentas
-        if method == "tools/list":
-            return jsonify({"id": req_id, "result": {"tools": TOOLS}})
+        # Falta id/method => erro JSON-RPC
+        if not method or req_id is None:
+            return jsonify(rpc_err(req_id, -32600, "Invalid Request")), 200
 
-        # Chamada de ferramenta
+        # --- MÉTODOS SUPORTADOS ---
+
+        # initialize (handshake)
+        if method == "initialize":
+            client_proto = (params.get("protocolVersion") or DEFAULT_PROTOCOL)
+            result = {
+                "protocolVersion": client_proto,
+                "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+                "capabilities": {
+                    "tools": {
+                        # envie true se seu servidor emitir notifications/tools/list_changed
+                        "listChanged": False
+                    }
+                },
+                # Instruções ajudam o modelo a entender os recursos do servidor
+                "instructions": "Ferramentas disponíveis: consultarClientes, atualizarCliente."
+            }
+            return jsonify(rpc_ok(req_id, result)), 200
+
+        # tools/list
+        if method == "tools/list":
+            result = {"tools": TOOLS}
+            return jsonify(rpc_ok(req_id, result)), 200
+
+        # tools/call
         if method == "tools/call":
             tool_name = params.get("name")
             arguments = params.get("arguments", {})
-            return jsonify({
-                "id": req_id,
-                "result": {
-                    "content": [
-                        {"type": "text", "text": f"Tool '{tool_name}' chamada com argumentos: {arguments}"}
-                    ]
-                }
-            })
 
-        # Healthcheck
-        if method in ("ping", "health"):
-            return jsonify({"id": req_id, "result": "ok"})
+            # Aqui você chamaria seu CRM de fato. Vamos simular.
+            text = f"Tool '{tool_name}' chamada com argumentos: {json.dumps(arguments, ensure_ascii=False)}"
+            result = {
+                "content": [
+                    {"type": "text", "text": text}
+                ],
+                "isError": False
+            }
+            return jsonify(rpc_ok(req_id, result)), 200
 
-        return jsonify({"id": req_id, "error": {"code": -32601, "message": f"Method '{method}' não suportado"}}), 400
+        # ping
+        if method == "ping":
+            return jsonify(rpc_ok(req_id, {"status": "ok"})), 200
+
+        # Método desconhecido -> erro JSON-RPC, mas HTTP 200
+        return jsonify(rpc_err(req_id, -32601, f"Method '{method}' not found")), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Nunca retornar 500 bruto para o cliente MCP; encapsule em erro JSON-RPC
+        # mas mantenha HTTP 200 para não quebrar o handshake do cliente.
+        req_id = None
+        try:
+            body = request.get_json(silent=True) or {}
+            req_id = body.get("id")
+        except Exception:
+            pass
+        return jsonify(rpc_err(req_id, -32603, "Internal error", str(e))), 200
 
-
-# Página inicial
-@app.route("/")
+@app.get("/")
 def home():
-    return "MCP server do CRM Base44 está no ar. Use /sse e /messages."
-
+    return "MCP do CRM Base44 no ar. Use /sse (GET) e /messages (POST)."
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000)
+    port = int(os.environ.get("PORT", "3000"))
+    app.run(host="0.0.0.0", port=port)
