@@ -3,7 +3,7 @@ import json
 
 app = Flask(__name__)
 
-# Definição das ferramentas disponíveis
+# Ferramentas disponíveis
 TOOLS = [
     {
         "name": "consultarClientes",
@@ -29,7 +29,7 @@ TOOLS = [
     }
 ]
 
-# SSE compatível com GET e POST
+# SSE: GET e POST
 @app.route("/sse", methods=["GET", "POST"])
 def sse():
     try:
@@ -42,7 +42,7 @@ def sse():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Endpoint para ChatGPT enviar ações
+# Endpoint de mensagens
 @app.route("/messages", methods=["POST"])
 def messages():
     try:
