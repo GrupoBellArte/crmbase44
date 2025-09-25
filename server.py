@@ -1,8 +1,9 @@
 from flask import Flask, request, Response, jsonify
+import json
 
 app = Flask(__name__)
 
-# Ferramentas expostas ao ChatGPT
+# Lista de ferramentas (MCP exige um "tool list")
 TOOLS = [
     {
         "name": "consultarClientes",
@@ -10,7 +11,8 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string"}
+                "id": {"type": "string"},
+                "dados": {"type": "object"}
             }
         }
     },
@@ -27,44 +29,38 @@ TOOLS = [
     }
 ]
 
-@app.route("/")
-def home():
-    return "✅ MCP server do CRM Base44 está rodando. Use /sse e /messages."
-
-# SSE → ChatGPT descobre as ferramentas
-@app.route("/sse", methods=["GET"])
+# Endpoint SSE para o ChatGPT listar ferramentas
+@app.route("/sse")
 def sse():
-    def stream():
-        yield "event: tool_list\n"
-        yield f"data: { {'tools': TOOLS} }\n\n"
-    return Response(stream(), mimetype="text/event-stream")
+    def event_stream():
+        yield f"event: tool_list\n"
+        yield f"data: {json.dumps({'tools': TOOLS})}\n\n"
+    return Response(event_stream(), mimetype="text/event-stream")
 
-# Messages → ChatGPT chama aqui quando usa uma ferramenta
+# Endpoint para o ChatGPT mandar ações (POST)
 @app.route("/messages", methods=["POST"])
 def messages():
-    data = request.json or {}
-    tool = data.get("tool")
-    params = data.get("params", {})
-
     try:
-        if tool == "consultarClientes":
-            # Simulação
-            resposta = {"clientes": [{"id": "123", "nome": "João Silva"}]}
+        data = request.json
+        print("Mensagem recebida:", data)
 
-        elif tool == "atualizarCliente":
-            resposta = {
-                "status": "sucesso",
-                "id": params.get("id"),
-                "dados": params.get("dados")
-            }
-
-        else:
-            resposta = {"erro": f"Ferramenta {tool} não reconhecida."}
-
+        # Exemplo de resposta genérica
+        resposta = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Recebi a ação: {data}"
+                }
+            ]
+        }
         return jsonify(resposta)
 
     except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/")
+def home():
+    return "MCP server do CRM Base44 está no ar. Use /sse e /messages."
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
